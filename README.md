@@ -362,7 +362,7 @@ Changing `EMBEDDING_MODEL_NAME` to a public Hugging Face / `sentence-transformer
 
 ## 7. Benchmark
 
-Current snapshot from [`docs/benchmarks/mvp_latest.md`](./docs/benchmarks/mvp_latest.md):
+Current snapshot from Local dev test.
 
 Environment:
 
