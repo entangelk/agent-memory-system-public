@@ -361,7 +361,7 @@ host-side `.env`는 compose가 열어둔 포트(`localhost:27018` / `localhost:8
 
 ## 7. Benchmark
 
-현재 스냅샷은 [`docs/benchmarks/mvp_latest.md`](./docs/benchmarks/mvp_latest.md)를 기준으로 합니다.
+현재 스냅샷은 개발 당시 로컬 테스트를 기준으로 합니다.
 
 실행 환경:
 
