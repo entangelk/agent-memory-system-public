@@ -184,6 +184,12 @@ MCP is the interface layer, not the main identity of the project.
 | `memory://stats` | Memory statistics and category distribution |
 | `memory://compaction-status` | Compaction readiness by level |
 
+### Prompts
+
+| Prompt | Description |
+|:--|:--|
+| `memory_tool_guide` | Optional guidance prompt for assistants: recall before answering memory-related questions, save distilled memories, use `session_digest` for longer conversations, and respect `memory_policy` |
+
 ## 6. Usage
 
 ### Transport Modes
@@ -252,6 +258,25 @@ Lifecycle note:
 
 - `mcp-http` is a long-running service and stays up until you stop it with `docker compose stop mcp-http` or `docker compose down`
 - `mongodb` and `chroma` are backend services and also stay up until explicitly stopped
+
+### Memory-Aware Client Guidance
+
+The server now exposes one optional MCP prompt:
+
+- `memory_tool_guide`
+
+If your client supports prompt arguments, pass the current user request as `user_request`.
+
+Recommended client-side system prompt:
+
+```text
+When the user asks what you remember, what they said before, or asks about their past preferences, plans, facts, or events, call `memory_recall` before answering from memory.
+When you learn a stable preference, fact, plan, or notable event worth keeping, save a concise distilled memory with `memory_save`.
+When a conversation is long and contains several candidate memories, use `session_digest` instead of saving raw conversation text.
+Follow `memory_policy`, and only include sensitive details when the user's request is explicit.
+```
+
+For most clients, this system prompt is the stronger nudge. MCP prompts are helpful, but many clients do not apply them automatically.
 
 ### Stdio Run (Compatibility)
 
@@ -449,7 +474,7 @@ Changing `EMBEDDING_MODEL_NAME` to a public Hugging Face / `sentence-transformer
 
 ## 7. Benchmark
 
-Current snapshot from Local dev test.
+Current snapshot from [`docs/benchmarks/mvp_latest.md`](./docs/benchmarks/mvp_latest.md):
 
 Environment:
 

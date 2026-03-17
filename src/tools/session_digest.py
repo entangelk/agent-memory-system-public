@@ -3,7 +3,7 @@ session_digest: extract memory candidates from a conversation and route them.
 
 Mode A (importance >= 10): save directly to memories
 Mode B (importance 7-9):   save to pending_memories for later approval
-Mode C (importance <= 3):  ignore
+Mode C (importance < 7):   ignore
 """
 from datetime import datetime, UTC
 from mcp.types import Tool, TextContent
@@ -18,7 +18,8 @@ def get_tools() -> list[Tool]:
             name="session_digest",
             description=(
                 "Process memory candidates extracted from a conversation session. "
-                "Importance 10 saves immediately, 7-9 goes to pending approval, and 3 or below is ignored."
+                "Use this when a longer interaction yields several candidate memories to triage at once. "
+                "Importance 10 saves immediately, 7-9 goes to pending approval, and anything below 7 is ignored."
             ),
             inputSchema={
                 "type": "object",

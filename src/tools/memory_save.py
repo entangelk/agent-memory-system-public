@@ -13,6 +13,7 @@ def get_tools() -> list[Tool]:
             name="memory_save",
             description=(
                 "Save a memory to the long-term memory store. "
+                "Use this when you learn a stable preference, fact, plan, or notable event worth remembering. "
                 "The content is stored as provided and may be returned verbatim during recall. "
                 "Clients should extract and summarize the essential information before saving. "
                 "Storing full conversations will reduce retrieval quality and make recall responses noisy. "

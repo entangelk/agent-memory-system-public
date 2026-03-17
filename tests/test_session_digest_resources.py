@@ -113,6 +113,42 @@ async def test_session_digest_updates_stats_resource_counts():
     assert stats["pending_approval"] == before_pending + 1
 
 
+async def test_session_digest_ignores_mid_importance_candidates_below_pending_threshold():
+    before_total = await col.memories().count_documents({})
+    before_pending = await col.pending_memories().count_documents({"status": "pending"})
+
+    result = await digest_handle("session_digest", {
+        "session_id": TEST_SESSION,
+        "candidates": [
+            {
+                "content": f"{CONTENT_PREFIX}mid_ignored",
+                "category": "fact",
+                "importance": 5,
+                "entities": ["session_digest_it_entity"],
+            },
+        ],
+    })
+
+    assert result is not None
+    summary = result[0].text
+    assert "saved immediately: 0" in summary
+    assert "pending approval: 0" in summary
+    assert "ignored: 1" in summary
+
+    saved = await col.memories().find_one({"content": f"{CONTENT_PREFIX}mid_ignored"})
+    assert saved is None
+
+    pending = await col.pending_memories().find_one({
+        "content": f"{CONTENT_PREFIX}mid_ignored",
+        "source_session": TEST_SESSION,
+    })
+    assert pending is None
+
+    stats = json.loads(await memory_resources._stats())
+    assert stats["total_memories"] == before_total
+    assert stats["pending_approval"] == before_pending
+
+
 async def test_session_digest_saved_memory_appears_in_recent_resource():
     content = f"{CONTENT_PREFIX}recent"
     await digest_handle("session_digest", {

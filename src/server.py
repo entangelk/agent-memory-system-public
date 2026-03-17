@@ -5,7 +5,7 @@ import uvicorn
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-from mcp.types import Tool, TextContent
+from mcp.types import GetPromptResult, Prompt, PromptArgument, PromptMessage, Tool, TextContent
 from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
@@ -33,6 +33,7 @@ memory_resources.register(app)
 
 # Register tool modules in a fixed order.
 _TOOL_MODULES = [memory_save, memory_recall, memory_summarize, session_digest, memory_approve, memory_compact, memory_update, memory_delete, topic_lookup, memory_policy]
+_MEMORY_TOOL_GUIDE_PROMPT = "memory_tool_guide"
 
 
 @app.list_tools()
@@ -50,6 +51,61 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         if result is not None:
             return result
     raise ValueError(f"Unknown tool: {name}")
+
+
+def _build_memory_tool_guide_text(user_request: str) -> str:
+    lines = [
+        "Use the memory tools deliberately.",
+        "If the user asks what you remember, refers to previous conversations, or asks about past preferences, plans, facts, or events, call `memory_recall` before answering from memory.",
+        "If you learn a stable preference, fact, plan, or notable event worth keeping, save a concise distilled memory with `memory_save`.",
+        "If a conversation is long and contains several candidate memories, use `session_digest` instead of saving raw conversation text.",
+        "Follow `memory_policy`, and only include sensitive details when the user's request is explicit.",
+    ]
+    if user_request:
+        lines.insert(0, f"Current user request: {user_request}")
+    return "\n".join(lines)
+
+
+@app.list_prompts()
+async def list_prompts() -> list[Prompt]:
+    return [
+        Prompt(
+            name=_MEMORY_TOOL_GUIDE_PROMPT,
+            description="Guidance for memory-aware assistants using recall/save tools in this MCP server.",
+            arguments=[
+                PromptArgument(
+                    name="user_request",
+                    description="Optional current user request to keep in scope while following the guide.",
+                    required=False,
+                )
+            ],
+        )
+    ]
+
+
+@app.get_prompt()
+async def get_prompt(name: str, arguments: dict[str, str] | None) -> GetPromptResult:
+    if name != _MEMORY_TOOL_GUIDE_PROMPT:
+        raise ValueError(f"Unknown prompt: {name}")
+
+    user_request = ""
+    if isinstance(arguments, dict):
+        raw_value = arguments.get("user_request", "")
+        if isinstance(raw_value, str):
+            user_request = raw_value.strip()
+
+    return GetPromptResult(
+        description="Optional guidance for assistants deciding when to recall or save memory.",
+        messages=[
+            PromptMessage(
+                role="user",
+                content=TextContent(
+                    type="text",
+                    text=_build_memory_tool_guide_text(user_request),
+                ),
+            )
+        ],
+    )
 
 
 async def _maybe_preload_embedding_model() -> None:

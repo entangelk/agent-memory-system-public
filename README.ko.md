@@ -184,6 +184,12 @@ MCP는 이 프로젝트의 정체성이라기보다 구현 인터페이스입니
 | `memory://stats` | 기억 통계 및 카테고리 분포 |
 | `memory://compaction-status` | 레벨별 compaction 준비 상태 |
 
+### Prompts
+
+| Prompt | 설명 |
+|:--|:--|
+| `memory_tool_guide` | 기억 관련 질문에는 먼저 recall하고, 저장은 distilled memory로 남기며, 긴 대화는 `session_digest`로 정리하고, `memory_policy`를 따르도록 안내하는 선택형 prompt |
+
 ## 6. Usage
 
 ### Transport Modes
@@ -252,6 +258,25 @@ http://localhost:8002/mcp
 
 - `mcp-http`는 장기 실행 서비스라서 `docker compose stop mcp-http` 또는 `docker compose down`을 하기 전까지 계속 살아 있습니다
 - `mongodb`, `chroma`도 backend 서비스라서 명시적으로 멈추기 전까지 계속 살아 있습니다
+
+### Memory-Aware Client Guidance
+
+서버는 이제 선택형 MCP prompt 하나를 함께 노출합니다.
+
+- `memory_tool_guide`
+
+클라이언트가 prompt argument를 지원하면 현재 사용자 요청을 `user_request`로 함께 넘기면 됩니다.
+
+권장 클라이언트 system prompt:
+
+```text
+사용자가 내가 무엇을 기억하는지, 전에 무슨 말을 했는지, 과거의 선호/계획/사실/이벤트를 묻는다면 답변 전에 `memory_recall`을 먼저 호출한다.
+지속해서 기억할 가치가 있는 안정적인 선호, 사실, 계획, 중요한 이벤트를 새로 알게 되면 `memory_save`로 간결하게 distilled memory를 저장한다.
+대화가 길고 기억 후보가 여러 개라면 raw conversation을 통째로 저장하지 말고 `session_digest`로 후보를 정리한다.
+민감한 내용이 섞일 수 있으면 `memory_policy`를 따르고, 사용자의 요청이 명시적일 때만 민감 상세를 포함한다.
+```
+
+대부분의 클라이언트에서는 이 system prompt가 더 강한 유도 장치입니다. MCP prompt는 도움이 되지만, 많은 클라이언트가 이를 자동으로 매 요청에 적용하지는 않습니다.
 
 ### Stdio Run (Compatibility)
 
@@ -448,7 +473,7 @@ host-side `.env`는 compose가 열어둔 포트(`localhost:27018` / `localhost:8
 
 ## 7. Benchmark
 
-현재 스냅샷은 개발 당시 로컬 테스트를 기준으로 합니다.
+현재 스냅샷은 [`docs/benchmarks/mvp_latest.md`](./docs/benchmarks/mvp_latest.md)를 기준으로 합니다.
 
 실행 환경:
 

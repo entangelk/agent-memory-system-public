@@ -13,6 +13,7 @@ def get_tools() -> list[Tool]:
             name="memory_recall",
             description=(
                 "Search stored memories. "
+                "Use this before answering questions about what you remember, prior conversations, or the user's past preferences, plans, facts, and events. "
                 "Combines Chroma centroid and memory-vector search when enabled, "
                 "and falls back to Mongo text search when unavailable."
             ),

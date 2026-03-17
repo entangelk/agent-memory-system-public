@@ -34,6 +34,10 @@ EXPECTED_RESOURCES = {
     "memory://compaction-status",
 }
 
+EXPECTED_PROMPTS = {
+    "memory_tool_guide",
+}
+
 
 def _first_text(content_blocks: list) -> str:
     for block in content_blocks:
@@ -68,9 +72,10 @@ async def cleanup():
     await db["pending_memories"].delete_many({"source_session": TEST_SESSION})
 
 
-async def test_mcp_server_lists_expected_tools_and_resources():
+async def test_mcp_server_lists_expected_tools_resources_and_prompts():
     list_tools_handler = app.request_handlers[types.ListToolsRequest]
     list_resources_handler = app.request_handlers[types.ListResourcesRequest]
+    list_prompts_handler = app.request_handlers[types.ListPromptsRequest]
 
     tools_result = await list_tools_handler(types.ListToolsRequest())
     assert isinstance(tools_result.root, types.ListToolsResult)
@@ -81,6 +86,36 @@ async def test_mcp_server_lists_expected_tools_and_resources():
     assert isinstance(resources_result.root, types.ListResourcesResult)
     resource_uris = {str(resource.uri) for resource in resources_result.root.resources}
     assert resource_uris == EXPECTED_RESOURCES
+
+    prompts_result = await list_prompts_handler(types.ListPromptsRequest())
+    assert isinstance(prompts_result.root, types.ListPromptsResult)
+    prompt_names = {prompt.name for prompt in prompts_result.root.prompts}
+    assert prompt_names == EXPECTED_PROMPTS
+
+
+async def test_mcp_server_exposes_memory_tool_prompt():
+    get_prompt_handler = app.request_handlers[types.GetPromptRequest]
+
+    prompt_result = await get_prompt_handler(
+        types.GetPromptRequest(
+            params=types.GetPromptRequestParams(
+                name="memory_tool_guide",
+                arguments={"user_request": "What do you remember about my coffee preference?"},
+            )
+        )
+    )
+
+    assert isinstance(prompt_result.root, types.GetPromptResult)
+    assert "recall or save memory" in (prompt_result.root.description or "")
+    prompt_text = "\n".join(
+        content.text
+        for content in (message.content for message in prompt_result.root.messages)
+        if getattr(content, "type", None) == "text"
+    )
+    assert "memory_recall" in prompt_text
+    assert "memory_save" in prompt_text
+    assert "session_digest" in prompt_text
+    assert "What do you remember about my coffee preference?" in prompt_text
 
 
 async def test_mcp_server_smoke_calls_tools_and_reads_resources():
