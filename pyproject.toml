@@ -13,8 +13,10 @@ dependencies = [
     "pymongo>=4.6.0",
     "pydantic>=2.0",
     "python-dotenv>=1.0",
+    "starlette>=0.37",
     "chromadb>=0.5.5",
     "sentence-transformers>=3.0.0",
+    "uvicorn>=0.30",
 ]
 
 [project.optional-dependencies]

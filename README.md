@@ -124,7 +124,7 @@ The architecture keeps MongoDB as the source of truth and treats ChromaDB as a r
 
 ```mermaid
 flowchart LR
-    A[AI Client<br/>Claude Code / Cursor / etc.] -->|MCP stdio| B[Agent Memory Server]
+    A[AI Client<br/>Claude Code / Cursor / etc.] -->|MCP stdio / Streamable HTTP| B[Agent Memory Server]
     B --> C[Tool Layer]
     C --> D[(MongoDB<br/>Source of Truth)]
     C --> E[(ChromaDB<br/>Vector Cache)]
@@ -186,20 +186,45 @@ MCP is the interface layer, not the main identity of the project.
 
 ## 6. Usage
 
-### Quick Start (Docker)
+### Transport Modes
+
+There are two MCP transport modes in this project:
+
+| Transport | Best for | Launch pattern | Notes |
+|:--|:--|:--|:--|
+| `stdio` | Local IDE/CLI integrations, clients that expect subprocess MCP servers | `python -m src.server` or `scripts/run_mcp_docker.sh` | One client/session usually means one server process. In Docker, that often means one container per session. |
+| `streamable-http` | Shared Docker/server deployment, multiple clients reusing one server | `docker compose up -d mcp-http` | One long-running server can accept multiple client connections over HTTP. |
+
+So the project now has two transports, but three practical setup options in the examples below:
+
+- `stdio` via local venv
+- `stdio` via Docker launcher
+- `streamable-http` via shared `mcp-http` service
+
+Recommended default:
+
+- For Docker and multi-client use, prefer `streamable-http`
+- Use `stdio` only when your MCP client specifically expects a subprocess server
+
+### Quick Start (Docker, Recommended)
 
 ```bash
 cp .env.example .env
 docker compose build app
-docker compose up -d mongodb chroma
+docker compose up -d mongodb chroma mcp-http
 docker compose run --rm app python scripts/init_db.py
 docker compose run --rm app python scripts/seed_rules.py
 docker compose run --rm app python scripts/init_profile.py
-docker compose run --rm --no-deps -T app python -m src.server
 ```
 
 `.env.example` is tuned for host-side runs (`localhost:27018` / `localhost:8001`).
 The app container uses `DOCKER_*` overrides from `docker-compose.yml`, so host values do not leak into in-container networking.
+
+Default shared endpoint:
+
+```text
+http://localhost:8002/mcp
+```
 
 Stop services:
 
@@ -207,7 +232,32 @@ Stop services:
 docker compose down
 ```
 
-### Local Run (Optional)
+### Shared Streamable HTTP (Docker, Recommended)
+
+If you want one long-running container that multiple MCP clients can share, start the dedicated HTTP service instead of launching the stdio server per session:
+
+```bash
+docker compose up -d mongodb chroma mcp-http
+```
+
+Default endpoint:
+
+```text
+http://localhost:8002/mcp
+```
+
+This avoids the `docker compose run ... python -m src.server` pattern creating one container per client session. Keep `scripts/run_mcp_docker.sh` only for clients that specifically require stdio.
+
+Lifecycle note:
+
+- `mcp-http` is a long-running service and stays up until you stop it with `docker compose stop mcp-http` or `docker compose down`
+- `mongodb` and `chroma` are backend services and also stay up until explicitly stopped
+
+### Stdio Run (Compatibility)
+
+Use this only when your MCP client requires `stdio`.
+
+#### Local Run (Optional)
 
 ```bash
 cp .env.example .env
@@ -218,22 +268,55 @@ pip install -e .[dev]
 python scripts/init_db.py
 python scripts/seed_rules.py
 python scripts/init_profile.py
+# stdio mode
 python -m src.server
 ```
 
+Local HTTP mode is also available when you want a shared server process:
+
+```bash
+MCP_TRANSPORT=streamable-http python -m src.server
+```
+
+Docker stdio lifecycle note:
+
+- `docker compose run --rm ... app python -m src.server` creates a transient `app` container
+- when the MCP client/agent disconnects, that stdio process exits and the `app` container is removed because of `--rm`
+- `mongodb` and `chroma` do not stop automatically
+
 ### MCP Client Setup (Claude Code)
+
+The setup options below are easy to confuse at first:
+
+- Recommended: `streamable-http`
+- Compatibility fallback: `stdio`
+- Option A and Option B are both `stdio`
 
 Run backend first:
 
 ```bash
-docker compose up -d mongodb chroma
+docker compose up -d mongodb chroma mcp-http
 ```
 
 `PRELOAD_EMBEDDING_MODEL=false` is the safe default for Docker MCP registration.
 If startup tries to download the embedding model before stdio is ready, some clients may time out during registration.
 Keep it `false` for the first run, let the model download/cache complete, and only then switch it to `true` if you want startup preload.
 
-#### Option A. Local venv server
+#### Recommended. Shared Streamable HTTP server
+
+For HTTP-capable MCP clients, run the shared service once and connect to:
+
+```text
+http://localhost:8002/mcp
+```
+
+```bash
+docker compose up -d mongodb chroma mcp-http
+```
+
+This is the preferred mode for Docker deployments where multiple clients should reuse one server container.
+
+#### Compatibility Option A. Local venv stdio server
 
 Replace `<PROJECT_DIR>` with your local repository path.
 
@@ -251,7 +334,7 @@ Replace `<PROJECT_DIR>` with your local repository path.
 }
 ```
 
-#### Option B. Docker server
+#### Compatibility Option B. Docker stdio server
 
 Replace `<PROJECT_DIR>` with your local repository path.
 
@@ -352,7 +435,11 @@ Changing `EMBEDDING_MODEL_NAME` to a public Hugging Face / `sentence-transformer
 | `EMBEDDING_DEVICE` | `cpu` | Embedding runtime device |
 | `EMBEDDING_CACHE_DIR` | empty | Local cache path |
 | `EMBEDDING_MAX_CHARS` | `1200` | Max chars before embedding truncation |
-| `PRELOAD_EMBEDDING_MODEL` | `false` | Preload the embedding model before MCP stdio starts; keep `false` for first Docker registration, switch to `true` only after the model cache is ready |
+| `PRELOAD_EMBEDDING_MODEL` | `false` | Preload the embedding model before the MCP server accepts requests; keep `false` for first Docker registration, switch to `true` only after the model cache is ready |
+| `MCP_TRANSPORT` | `stdio` | MCP transport mode: `stdio` or `streamable-http` |
+| `MCP_HTTP_HOST` | `127.0.0.1` | Host/interface for Streamable HTTP mode |
+| `MCP_HTTP_PORT` | `8002` | Port for Streamable HTTP mode |
+| `MCP_HTTP_PATH` | `/mcp` | Mount path for Streamable HTTP mode |
 | `DOCKER_MONGODB_URI` | `mongodb://mongodb:27017` | Mongo URI used only by the app container |
 | `DOCKER_CHROMA_HOST` | `chroma` | Chroma host used only by the app container |
 | `DOCKER_CHROMA_PORT` | `8000` | Chroma port used only by the app container |

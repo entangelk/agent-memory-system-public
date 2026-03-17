@@ -1,7 +1,14 @@
 import asyncio
+from contextlib import asynccontextmanager
+
+import uvicorn
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types import Tool, TextContent
+from starlette.applications import Starlette
+from starlette.routing import Route
+from starlette.types import Receive, Scope, Send
 
 from src import config
 from src.tools import (
@@ -45,12 +52,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     raise ValueError(f"Unknown tool: {name}")
 
 
-async def main() -> None:
+async def _maybe_preload_embedding_model() -> None:
     if config.PRELOAD_EMBEDDING_MODEL:
         # Optional preload to reduce first recall latency after the model is already cached.
         from src.engine.chroma_engine import chroma_enabled, _get_model
         if chroma_enabled():
             await asyncio.to_thread(_get_model)
+
+
+async def run_stdio_server() -> None:
+    await _maybe_preload_embedding_model()
 
     async with stdio_server() as (read_stream, write_stream):
         try:
@@ -59,5 +70,64 @@ async def main() -> None:
             await close_connection()
 
 
+class StreamableHTTPASGIApp:
+    def __init__(self, session_manager: StreamableHTTPSessionManager):
+        self._session_manager = session_manager
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        await self._session_manager.handle_request(scope, receive, send)
+
+
+def create_streamable_http_app() -> Starlette:
+    session_manager = StreamableHTTPSessionManager(
+        app=app,
+        json_response=False,
+        stateless=False,
+    )
+
+    transport_app = StreamableHTTPASGIApp(session_manager)
+
+    @asynccontextmanager
+    async def lifespan(_: Starlette):
+        try:
+            await _maybe_preload_embedding_model()
+            async with session_manager.run():
+                yield
+        finally:
+            await close_connection()
+
+    return Starlette(
+        routes=[
+            Route(
+                config.MCP_HTTP_PATH,
+                endpoint=transport_app,
+                methods=["GET", "POST", "DELETE"],
+            )
+        ],
+        lifespan=lifespan,
+    )
+
+
+def run_streamable_http_server() -> None:
+    uvicorn.run(
+        create_streamable_http_app(),
+        host=config.MCP_HTTP_HOST,
+        port=config.MCP_HTTP_PORT,
+        log_level="info",
+    )
+
+
+def main() -> None:
+    if config.MCP_TRANSPORT == "stdio":
+        asyncio.run(run_stdio_server())
+        return
+
+    if config.MCP_TRANSPORT == "streamable-http":
+        run_streamable_http_server()
+        return
+
+    raise ValueError(f"Unsupported MCP transport: {config.MCP_TRANSPORT}")
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

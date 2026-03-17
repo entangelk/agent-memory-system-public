@@ -124,7 +124,7 @@ experience / conversation
 
 ```mermaid
 flowchart LR
-    A[AI Client<br/>Claude Code / Cursor / etc.] -->|MCP stdio| B[Agent Memory Server]
+    A[AI Client<br/>Claude Code / Cursor / etc.] -->|MCP stdio / Streamable HTTP| B[Agent Memory Server]
     B --> C[Tool Layer]
     C --> D[(MongoDB<br/>Source of Truth)]
     C --> E[(ChromaDB<br/>Vector Cache)]
@@ -186,20 +186,45 @@ MCP는 이 프로젝트의 정체성이라기보다 구현 인터페이스입니
 
 ## 6. Usage
 
-### Quick Start (Docker)
+### Transport Modes
+
+이 프로젝트에는 MCP transport가 2가지 있습니다.
+
+| Transport | 적합한 경우 | 실행 방식 | 설명 |
+|:--|:--|:--|:--|
+| `stdio` | 로컬 IDE/CLI 연동, subprocess MCP 서버를 기대하는 클라이언트 | `python -m src.server` 또는 `scripts/run_mcp_docker.sh` | 보통 클라이언트/세션 1개당 서버 프로세스 1개가 필요합니다. Docker에서는 세션마다 컨테이너가 하나씩 생기기 쉽습니다. |
+| `streamable-http` | shared Docker/server 배포, 여러 클라이언트가 서버 1개를 재사용하는 경우 | `docker compose up -d mcp-http` | 장기 실행 서버 1개가 여러 클라이언트 연결을 HTTP로 받을 수 있습니다. |
+
+즉 transport는 2개지만, 아래 예시에서는 실제 사용 방식이 3가지로 보일 수 있습니다.
+
+- 로컬 venv 기반 `stdio`
+- Docker launcher 기반 `stdio`
+- shared `mcp-http` 기반 `streamable-http`
+
+권장 기본값:
+
+- Docker와 multi-client 용도에는 `streamable-http`를 우선 권장
+- MCP 클라이언트가 subprocess 서버를 꼭 요구할 때만 `stdio` 사용
+
+### Quick Start (Docker, Recommended)
 
 ```bash
 cp .env.example .env
 docker compose build app
-docker compose up -d mongodb chroma
+docker compose up -d mongodb chroma mcp-http
 docker compose run --rm app python scripts/init_db.py
 docker compose run --rm app python scripts/seed_rules.py
 docker compose run --rm app python scripts/init_profile.py
-docker compose run --rm --no-deps -T app python -m src.server
 ```
 
 `.env.example`는 host-side 실행 기준(`localhost:27018` / `localhost:8001`)으로 맞춰져 있습니다.
 반면 app 컨테이너는 `docker-compose.yml`의 `DOCKER_*` override를 사용하므로, host 값이 컨테이너 내부 네트워크 설정에 섞이지 않습니다.
+
+기본 shared endpoint:
+
+```text
+http://localhost:8002/mcp
+```
 
 종료:
 
@@ -207,7 +232,32 @@ docker compose run --rm --no-deps -T app python -m src.server
 docker compose down
 ```
 
-### Local Run (Optional)
+### Shared Streamable HTTP (Docker, Recommended)
+
+여러 MCP 클라이언트가 컨테이너 1개를 공유해야 한다면, 세션마다 stdio 서버를 띄우지 말고 전용 HTTP 서비스를 올리면 됩니다.
+
+```bash
+docker compose up -d mongodb chroma mcp-http
+```
+
+기본 엔드포인트:
+
+```text
+http://localhost:8002/mcp
+```
+
+이 방식이면 `docker compose run ... python -m src.server` 때문에 클라이언트 세션마다 컨테이너가 하나씩 늘어나는 문제를 피할 수 있습니다. `scripts/run_mcp_docker.sh`는 stdio가 꼭 필요한 클라이언트에서만 유지하면 됩니다.
+
+라이프사이클 메모:
+
+- `mcp-http`는 장기 실행 서비스라서 `docker compose stop mcp-http` 또는 `docker compose down`을 하기 전까지 계속 살아 있습니다
+- `mongodb`, `chroma`도 backend 서비스라서 명시적으로 멈추기 전까지 계속 살아 있습니다
+
+### Stdio Run (Compatibility)
+
+이 경로는 MCP 클라이언트가 `stdio`를 꼭 요구할 때만 사용하면 됩니다.
+
+#### Local Run (Optional)
 
 ```bash
 cp .env.example .env
@@ -218,22 +268,55 @@ pip install -e .[dev]
 python scripts/init_db.py
 python scripts/seed_rules.py
 python scripts/init_profile.py
+# stdio 모드
 python -m src.server
 ```
 
+공유 프로세스가 필요하면 로컬에서도 HTTP 모드로 실행할 수 있습니다.
+
+```bash
+MCP_TRANSPORT=streamable-http python -m src.server
+```
+
+Docker stdio 라이프사이클 메모:
+
+- `docker compose run --rm ... app python -m src.server`는 일시적인 `app` 컨테이너를 만듭니다
+- MCP 클라이언트/에이전트 연결이 끊기면 stdio 프로세스가 종료되고, `--rm` 때문에 `app` 컨테이너도 함께 삭제됩니다
+- `mongodb`, `chroma`는 자동으로 내려가지 않습니다
+
 ### MCP Client Setup (Claude Code)
+
+여기서 헷갈리기 쉬운 부분을 먼저 정리하면:
+
+- 권장 경로는 `streamable-http`
+- 호환용 fallback이 `stdio`
+- Option A와 Option B는 둘 다 `stdio`
 
 먼저 백엔드를 실행합니다.
 
 ```bash
-docker compose up -d mongodb chroma
+docker compose up -d mongodb chroma mcp-http
 ```
 
 `PRELOAD_EMBEDDING_MODEL=false`를 Docker MCP 등록의 안전한 기본값으로 둡니다.
 서버 시작 전에 임베딩 모델 다운로드가 걸리면 stdio가 열리기 전에 일부 클라이언트 등록이 timeout 날 수 있습니다.
 처음에는 `false`로 두고 모델 다운로드/캐시가 끝난 뒤에만 `true`로 바꿔 startup preload를 쓰는 편이 안전합니다.
 
-#### Option A. Local venv server
+#### Recommended. Shared Streamable HTTP server
+
+HTTP를 지원하는 MCP 클라이언트라면, shared 서비스를 한 번 띄워두고 아래 엔드포인트에 연결하면 됩니다.
+
+```text
+http://localhost:8002/mcp
+```
+
+```bash
+docker compose up -d mongodb chroma mcp-http
+```
+
+Docker 안에서 여러 클라이언트가 하나의 서버 컨테이너를 재사용해야 할 때 이 모드가 가장 적합합니다.
+
+#### Compatibility Option A. Local venv stdio server
 
 `<PROJECT_DIR>`를 로컬 저장소 경로로 바꿔 사용하세요.
 
@@ -251,7 +334,7 @@ docker compose up -d mongodb chroma
 }
 ```
 
-#### Option B. Docker server
+#### Compatibility Option B. Docker stdio server
 
 `<PROJECT_DIR>`를 로컬 저장소 경로로 바꿔 사용하세요.
 
@@ -351,7 +434,11 @@ host-side `.env`는 compose가 열어둔 포트(`localhost:27018` / `localhost:8
 | `EMBEDDING_DEVICE` | `cpu` | 임베딩 실행 디바이스 |
 | `EMBEDDING_CACHE_DIR` | empty | 로컬 캐시 경로 |
 | `EMBEDDING_MAX_CHARS` | `1200` | 임베딩 전 최대 문자 수 |
-| `PRELOAD_EMBEDDING_MODEL` | `false` | MCP stdio 시작 전에 임베딩 모델을 preload할지 여부. 첫 Docker 등록은 `false`로 두고, 모델 캐시가 준비된 뒤에만 `true` 사용 권장 |
+| `PRELOAD_EMBEDDING_MODEL` | `false` | MCP 서버가 요청을 받기 전에 임베딩 모델을 preload할지 여부. 첫 Docker 등록은 `false`로 두고, 모델 캐시가 준비된 뒤에만 `true` 사용 권장 |
+| `MCP_TRANSPORT` | `stdio` | MCP transport 모드: `stdio` 또는 `streamable-http` |
+| `MCP_HTTP_HOST` | `127.0.0.1` | Streamable HTTP 모드 바인드 호스트 |
+| `MCP_HTTP_PORT` | `8002` | Streamable HTTP 모드 포트 |
+| `MCP_HTTP_PATH` | `/mcp` | Streamable HTTP 모드 마운트 경로 |
 | `DOCKER_MONGODB_URI` | `mongodb://mongodb:27017` | app 컨테이너에서만 쓰는 Mongo URI |
 | `DOCKER_CHROMA_HOST` | `chroma` | app 컨테이너에서만 쓰는 Chroma 호스트 |
 | `DOCKER_CHROMA_PORT` | `8000` | app 컨테이너에서만 쓰는 Chroma 포트 |
