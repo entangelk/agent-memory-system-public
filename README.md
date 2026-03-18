@@ -8,7 +8,7 @@
 
 Long-term memory architecture for persistent AI assistants.
 
-Status: Beta  
+Status: Release Candidate (RC1)  
 Runtime: Python 3.11+  
 Storage: MongoDB (Source of Truth) + ChromaDB (Vector Cache)
 
@@ -164,8 +164,8 @@ MCP is the interface layer, not the main identity of the project.
 
 | Tool | Description |
 |:--|:--|
-| `memory_save` | Save memory with category/importance/sensitivity |
-| `memory_recall` | Semantic/date recall with similarity reranking, debug/sensitive options |
+| `memory_save` | Save memory with category/importance/sensitivity and optional source agent/client metadata |
+| `memory_recall` | Semantic/date recall with similarity reranking, debug/sensitive options, and source metadata in debug output |
 | `memory_summarize` | Summarize memories by category/topic |
 | `session_digest` | Extract memory candidates from conversation |
 | `memory_approve` | List/approve/dismiss pending memories |
@@ -271,12 +271,36 @@ Recommended client-side system prompt:
 
 ```text
 When the user asks what you remember, what they said before, or asks about their past preferences, plans, facts, or events, call `memory_recall` before answering from memory.
-When you learn a stable preference, fact, plan, or notable event worth keeping, save a concise distilled memory with `memory_save`.
+Only save memory with `memory_save` when the user explicitly asks to remember something, or when the conversation reveals a durable and important fact, plan, or preference worth carrying across sessions.
+Do not auto-save style or preference memories just because the user is asking about the memory system itself.
 When a conversation is long and contains several candidate memories, use `session_digest` instead of saving raw conversation text.
 Follow `memory_policy`, and only include sensitive details when the user's request is explicit.
 ```
 
 For most clients, this system prompt is the stronger nudge. MCP prompts are helpful, but many clients do not apply them automatically.
+
+Instruction hierarchy in practice:
+
+- Client/platform system prompt
+- Client-local rules or workspace instructions
+- MCP prompt and tool descriptions
+
+Because of that hierarchy, the README and deployment-time client configuration are the portable places to document the intended memory behavior. This repository does not ship client-local rule files for every MCP client.
+
+If a client has its own built-in memory or local note system, document how it should interact with this MCP server in the client configuration you deploy. Otherwise you can end up with split memory behavior where local memory triggers before `memory_save`.
+
+Client and agent caveats:
+
+- Some failures come from the client agent, not from this MCP server. If recall queries are rewritten with repository-specific keywords, the problem is usually query construction on the agent side.
+- Clients with built-in memory or file-based note systems can override MCP behavior. Claude Code is a concrete example: its built-in file memory may trigger before `memory_save` unless your deployed client configuration says otherwise.
+- MCP prompts and tool descriptions are weak guidance. They cannot reliably override a stronger client system prompt or built-in behavior.
+- Cross-agent reuse needs care. When provenance matters, save `source_agent` and `source_client`; without source metadata, a memory from one tool environment can be misleading in another.
+
+Why some guidance stays in README instead of runtime prompts:
+
+- We currently keep query-construction advice for `memory_recall` in documentation, not in the default runtime prompt/tool surface. That advice affects search quality and can be too prescriptive as a universal runtime rule.
+- We also avoid overloading `memory_tool_guide` with too many policy details by default. Its role is lightweight tool discovery, not full behavioral enforcement.
+- If stricter behavior control is needed later, separate operating modes are likely a cleaner design than pushing every policy into one default prompt.
 
 ### Stdio Run (Compatibility)
 
@@ -296,6 +320,12 @@ python scripts/init_profile.py
 # stdio mode
 python -m src.server
 ```
+
+Local startup note:
+
+- The first local setup can take a while because Python dependencies are installed on the machine.
+- The first embedding-backed recall or preload can also take extra time because the model must be downloaded and loaded locally.
+- Later runs are typically much faster once the virtual environment and embedding cache are ready.
 
 Local HTTP mode is also available when you want a shared server process:
 
@@ -326,6 +356,12 @@ docker compose up -d mongodb chroma mcp-http
 `PRELOAD_EMBEDDING_MODEL=false` is the safe default for Docker MCP registration.
 If startup tries to download the embedding model before stdio is ready, some clients may time out during registration.
 Keep it `false` for the first run, let the model download/cache complete, and only then switch it to `true` if you want startup preload.
+
+Claude Code caution:
+
+- Claude Code can prefer its built-in file memory over MCP memory tools for "remember this" style requests.
+- If you want this server to be the primary memory layer, put that rule in the client configuration you actually deploy, not only in MCP prompt text.
+- When documenting Claude Code for teammates, call out the intended precedence explicitly: use MCP memory first, treat local file memory as disabled or secondary.
 
 #### Recommended. Shared Streamable HTTP server
 
@@ -392,7 +428,9 @@ Save memory:
     "content": "User prefers sugar-free sparkling water.",
     "category": "preference",
     "importance": 8,
-    "sensitivity": "normal"
+    "sensitivity": "normal",
+    "source_agent": "gpt-5.4",
+    "source_client": "codex-cli"
   }
 }
 ```
@@ -472,46 +510,9 @@ Changing `EMBEDDING_MODEL_NAME` to a public Hugging Face / `sentence-transformer
 | `CENTROID_STALE_DAYS` | `14` | Stale centroid threshold (days) |
 | `SIMILARITY_WEIGHT` | `15.0` | Semantic similarity bonus weight for recall scoring |
 
-## 7. Benchmark
+## 7. Project Scope
 
-Current snapshot from [`docs/benchmarks/mvp_latest.md`](./docs/benchmarks/mvp_latest.md):
-
-Environment:
-
-- `seed_count`: `30`
-- `warmup`: `3`
-- `chroma_enabled`: `True`
-- `chroma_collection_name`: `memory_bge_m3_v1`
-- `embedding_model_name`: `dragonkue/BGE-m3-ko`
-
-Latency (ms):
-
-| Metric | Save | Recall |
-|:--|--:|--:|
-| count | 20 | 20 |
-| avg | 6.97 | 342.70 |
-| p50 | 6.56 | 308.06 |
-| p95 | 8.54 | 505.40 |
-| max | 8.75 | 692.27 |
-
-Memory Usage (MB):
-
-| Metric | Value |
-|:--|--:|
-| rss_max_mb_before | 74.59 |
-| rss_max_mb_after | 2448.53 |
-| rss_max_mb_increase | 2373.94 |
-
-How to read these numbers:
-
-- Recall is heavier than save because it combines vector lookup, Mongo candidate loading, and score reranking.
-- The large RSS increase likely reflects the in-process embedding model becoming resident during the benchmark run.
-- MongoDB remains the source of truth, so ChromaDB can be rebuilt as cache with `python scripts/rebuild_chroma.py`.
-- This separation keeps durable storage simple while allowing semantic recall and cache rebuild workflows.
-
-## 8. Project Scope
-
-### Beta Scope
+### Release Candidate Scope
 
 - Stable MCP tool and resource contract
 - MongoDB source of truth with rebuildable Chroma cache
@@ -534,7 +535,9 @@ scripts/
   seed_rules.py            initial rule seed
   init_profile.py          default profile bootstrap
   rebuild_chroma.py        rebuild vector cache from Mongo SoT
-docker-compose.yml         local stack (mongodb/chroma/app)
+  reindex_chroma.py        re-sync/backfill Chroma documents
+  run_mcp_docker.sh        Docker stdio launcher
+docker-compose.yml         local stack + shared `mcp-http` service
 ```
 
 ### Third-Party License Notice

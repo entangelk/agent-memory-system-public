@@ -322,6 +322,8 @@ async def handle(name: str, args: dict) -> list[TextContent] | None:
                 "topic_id": str(doc.get("topic_id")) if doc.get("topic_id") is not None else None,
                 "category": doc.get("category"),
                 "importance": doc.get("importance", 0),
+                "source_agent": doc.get("source_agent"),
+                "source_client": doc.get("source_client"),
                 "sensitivity": effective_sensitivity,
                 "is_redacted": is_redacted,
                 "similarity": round(sim, 4),

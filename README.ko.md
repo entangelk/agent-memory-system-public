@@ -8,7 +8,7 @@
 
 지속형 AI 비서를 위한 장기 기억 아키텍처입니다.
 
-상태: Beta  
+상태: Release Candidate (RC1)  
 런타임: Python 3.11+  
 저장소: MongoDB (Source of Truth) + ChromaDB (Vector Cache)
 
@@ -164,8 +164,8 @@ MCP는 이 프로젝트의 정체성이라기보다 구현 인터페이스입니
 
 | Tool | 설명 |
 |:--|:--|
-| `memory_save` | 카테고리/중요도/민감도 기반 기억 저장 |
-| `memory_recall` | 의미/날짜 기반 회상, similarity 재랭킹, debug/sensitive 옵션 지원 |
+| `memory_save` | 카테고리/중요도/민감도와 선택형 source agent/client 메타데이터 기반 기억 저장 |
+| `memory_recall` | 의미/날짜 기반 회상, similarity 재랭킹, debug/sensitive 옵션 지원, debug 출력에 source 메타데이터 포함 |
 | `memory_summarize` | 카테고리/토픽별 기억 요약 |
 | `session_digest` | 대화 내용을 기억 후보로 추출 |
 | `memory_approve` | pending 기억 조회/승인/기각 |
@@ -271,12 +271,36 @@ http://localhost:8002/mcp
 
 ```text
 사용자가 내가 무엇을 기억하는지, 전에 무슨 말을 했는지, 과거의 선호/계획/사실/이벤트를 묻는다면 답변 전에 `memory_recall`을 먼저 호출한다.
-지속해서 기억할 가치가 있는 안정적인 선호, 사실, 계획, 중요한 이벤트를 새로 알게 되면 `memory_save`로 간결하게 distilled memory를 저장한다.
+`memory_save`는 사용자가 명시적으로 기억해 달라고 요청했거나, 대화 중 세션을 넘어 유지할 가치가 있는 중요하고 지속적인 사실/계획/선호가 드러났을 때만 사용한다.
+사용자가 기억 시스템 자체를 질문하고 있다는 이유만으로 스타일이나 선호를 자동 저장하지 않는다.
 대화가 길고 기억 후보가 여러 개라면 raw conversation을 통째로 저장하지 말고 `session_digest`로 후보를 정리한다.
 민감한 내용이 섞일 수 있으면 `memory_policy`를 따르고, 사용자의 요청이 명시적일 때만 민감 상세를 포함한다.
 ```
 
 대부분의 클라이언트에서는 이 system prompt가 더 강한 유도 장치입니다. MCP prompt는 도움이 되지만, 많은 클라이언트가 이를 자동으로 매 요청에 적용하지는 않습니다.
+
+실제 지침 우선순위:
+
+- 클라이언트/플랫폼 system prompt
+- 클라이언트 로컬 rules 또는 workspace instructions
+- MCP prompt 및 tool description
+
+그래서 의도한 기억 동작을 이식 가능하게 전달하려면, README와 배포 시 넣는 클라이언트 설정에 운영 규칙을 명시하는 편이 가장 안전합니다. 이 저장소는 모든 MCP 클라이언트용 로컬 rules 파일을 함께 배포하지는 않습니다.
+
+클라이언트에 자체 memory 또는 로컬 note 시스템이 있다면, 배포하는 클라이언트 설정에서 이 MCP 서버와의 우선순위를 함께 문서화해야 합니다. 그렇지 않으면 `memory_save`보다 로컬 메모리가 먼저 트리거되는 split memory 동작이 생길 수 있습니다.
+
+클라이언트/에이전트 사용 시 주의점:
+
+- 일부 문제는 이 MCP 서버가 아니라 클라이언트 에이전트에서 발생합니다. recall query에 현재 저장소 키워드가 섞이면, 대체로 서버 문제가 아니라 에이전트의 query 구성 문제입니다.
+- 자체 memory 또는 파일 기반 note 시스템이 있는 클라이언트는 MCP 동작을 덮어쓸 수 있습니다. Claude Code가 대표적인 예로, 배포한 클라이언트 설정에서 우선순위를 정해주지 않으면 내장 파일 메모리가 `memory_save`보다 먼저 트리거될 수 있습니다.
+- MCP prompt와 tool description은 약한 유도 장치입니다. 더 강한 클라이언트 system prompt나 내장 동작을 안정적으로 덮어쓰지는 못합니다.
+- 크로스 에이전트 재사용에도 주의가 필요합니다. 출처가 중요하다면 `source_agent`, `source_client`를 함께 저장하세요. 이런 메타데이터가 없으면 한 도구에서 저장한 기억이 다른 도구에서는 오해를 부를 수 있습니다.
+
+일부 가이드를 README에 두고 런타임 prompt에는 넣지 않는 이유:
+
+- 현재 `memory_recall`의 query 구성 가이드는 기본 런타임 prompt/tool surface가 아니라 문서에 둡니다. 이 내용은 검색 품질에 직접 영향을 주기 때문에, 모든 상황에 강제하는 기본 규칙으로 넣기에는 과도할 수 있습니다.
+- `memory_tool_guide`도 기본값에서는 너무 많은 정책을 실지 않습니다. 이 prompt의 역할은 가벼운 도구 안내이지, 전체 행동 정책 집행이 아닙니다.
+- 나중에 더 강한 제어가 필요하면, 모든 정책을 기본 prompt 하나에 밀어 넣는 것보다 운영 모드를 분리하는 편이 더 깔끔할 가능성이 큽니다.
 
 ### Stdio Run (Compatibility)
 
@@ -296,6 +320,12 @@ python scripts/init_profile.py
 # stdio 모드
 python -m src.server
 ```
+
+로컬 초기 구동 메모:
+
+- 처음 로컬 환경을 띄울 때는 Python 의존성을 머신에 설치하므로 준비 시간이 꽤 걸릴 수 있습니다.
+- 첫 임베딩 기반 recall 또는 preload 시점에는 임베딩 모델을 로컬에서 다운로드하고 메모리에 로드해야 해서 추가 시간이 걸릴 수 있습니다.
+- 이후에는 가상환경과 임베딩 캐시가 준비된 상태라 보통 훨씬 빨라집니다.
 
 공유 프로세스가 필요하면 로컬에서도 HTTP 모드로 실행할 수 있습니다.
 
@@ -326,6 +356,12 @@ docker compose up -d mongodb chroma mcp-http
 `PRELOAD_EMBEDDING_MODEL=false`를 Docker MCP 등록의 안전한 기본값으로 둡니다.
 서버 시작 전에 임베딩 모델 다운로드가 걸리면 stdio가 열리기 전에 일부 클라이언트 등록이 timeout 날 수 있습니다.
 처음에는 `false`로 두고 모델 다운로드/캐시가 끝난 뒤에만 `true`로 바꿔 startup preload를 쓰는 편이 안전합니다.
+
+Claude Code 사용 시 주의:
+
+- Claude Code는 "기억해줘" 같은 요청에서 MCP memory tool보다 내장 파일 메모리를 우선 사용할 수 있습니다.
+- 이 서버를 주 기억 계층으로 쓰고 싶다면, 그 규칙은 MCP prompt 텍스트만이 아니라 실제 배포하는 클라이언트 설정에 넣어야 합니다.
+- 팀 문서나 운영 가이드에는 우선순위를 분명히 적는 편이 안전합니다: MCP memory 우선 사용, 로컬 파일 메모리는 비활성 또는 보조 수단으로 취급.
 
 #### Recommended. Shared Streamable HTTP server
 
@@ -392,7 +428,9 @@ PRELOAD_EMBEDDING_MODEL=true ./scripts/run_mcp_docker.sh
     "content": "사용자는 무설탕 탄산수를 선호한다.",
     "category": "preference",
     "importance": 8,
-    "sensitivity": "normal"
+    "sensitivity": "normal",
+    "source_agent": "gpt-5.4",
+    "source_client": "codex-cli"
   }
 }
 ```
@@ -471,46 +509,9 @@ host-side `.env`는 compose가 열어둔 포트(`localhost:27018` / `localhost:8
 | `CENTROID_STALE_DAYS` | `14` | stale centroid 판단 일수 |
 | `SIMILARITY_WEIGHT` | `15.0` | recall 점수 계산 시 의미 유사도 보너스 가중치 |
 
-## 7. Benchmark
+## 7. Project Scope
 
-현재 스냅샷은 [`docs/benchmarks/mvp_latest.md`](./docs/benchmarks/mvp_latest.md)를 기준으로 합니다.
-
-실행 환경:
-
-- `seed_count`: `30`
-- `warmup`: `3`
-- `chroma_enabled`: `True`
-- `chroma_collection_name`: `memory_bge_m3_v1`
-- `embedding_model_name`: `dragonkue/BGE-m3-ko`
-
-지연시간 (ms):
-
-| 지표 | Save | Recall |
-|:--|--:|--:|
-| count | 20 | 20 |
-| avg | 6.97 | 342.70 |
-| p50 | 6.56 | 308.06 |
-| p95 | 8.54 | 505.40 |
-| max | 8.75 | 692.27 |
-
-메모리 사용량 (MB):
-
-| 지표 | 값 |
-|:--|--:|
-| rss_max_mb_before | 74.59 |
-| rss_max_mb_after | 2448.53 |
-| rss_max_mb_increase | 2373.94 |
-
-이 수치를 읽는 방법:
-
-- recall은 벡터 조회, Mongo 후보 로딩, 점수 재정렬을 함께 수행하므로 save보다 무겁습니다.
-- 큰 RSS 증가폭은 벤치마크 실행 중 프로세스 내부에 임베딩 모델이 상주하게 된 영향일 가능성이 큽니다.
-- MongoDB가 source of truth이므로 ChromaDB는 `python scripts/rebuild_chroma.py`로 다시 만들 수 있는 캐시입니다.
-- 이 분리는 저장 정합성을 단순하게 유지하면서도 의미 기반 recall과 캐시 재구축 워크플로우를 가능하게 합니다.
-
-## 8. Project Scope
-
-### Beta Scope
+### Release Candidate Scope
 
 - 안정적인 MCP tool/resource 계약
 - MongoDB source of truth + 재구축 가능한 Chroma cache
@@ -533,7 +534,9 @@ scripts/
   seed_rules.py            초기 rule seed
   init_profile.py          기본 profile 초기화
   rebuild_chroma.py        Mongo SoT 기준 벡터 캐시 재구축
-docker-compose.yml         로컬 스택 (mongodb/chroma/app)
+  reindex_chroma.py        Chroma 문서 재동기화/백필
+  run_mcp_docker.sh        Docker stdio 런처
+docker-compose.yml         로컬 스택 + shared `mcp-http` 서비스
 ```
 
 ### Third-Party License Notice

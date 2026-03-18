@@ -202,6 +202,26 @@ async def test_memory_save_does_not_infer_by_keyword():
     assert payload.get("sensitivity") == "normal"
 
 
+async def test_memory_save_tool_stores_source_metadata():
+    result = await save_handle("memory_save", {
+        "content": "source metadata save case",
+        "category": "fact",
+        "importance": 7,
+        "context": TEST_CONTEXT,
+        "source_agent": " gpt-5.4 ",
+        "source_client": " Codex ",
+    })
+    assert result is not None
+    payload = json.loads(result[0].text)
+    assert payload.get("source_agent") == "gpt-5.4"
+    assert payload.get("source_client") == "Codex"
+
+    doc = await col.memories().find_one({"_id": ObjectId(payload["id"])})
+    assert doc is not None
+    assert doc.get("source_agent") == "gpt-5.4"
+    assert doc.get("source_client") == "Codex"
+
+
 async def test_topic_auto_created_after_3_memories():
     """같은 엔티티를 공유하는 기억 3개 저장 시 topic 자동 생성."""
     entities = ["자동생성엔티티_테스트"]

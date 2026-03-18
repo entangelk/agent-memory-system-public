@@ -135,6 +135,40 @@ async def test_recall_supports_date_browsing_without_query(monkeypatch):
     assert "created_at_ts" in captured["filters"]
 
 
+async def test_recall_debug_echoes_trimmed_query():
+    await save_memory(
+        content="debug query echo recall_debug_query_case",
+        category="fact",
+        importance=6,
+        entities=["recall_test"],
+    )
+
+    result = await handle("memory_recall", {"query": "  recall_debug_query_case  ", "include_debug": True})
+    assert result is not None
+    payload = json.loads(result[0].text)
+    assert payload.get("query") == "recall_debug_query_case"
+
+
+async def test_recall_debug_includes_source_metadata():
+    await save_memory(
+        content="recall source metadata case",
+        category="fact",
+        importance=6,
+        entities=["recall_test"],
+        source_agent="gpt-5.4",
+        source_client="Codex",
+    )
+
+    result = await handle("memory_recall", {"query": "recall source metadata case", "include_debug": True})
+    assert result is not None
+    payload = json.loads(result[0].text)
+    rows = payload.get("results", [])
+    assert rows
+    row = rows[0]
+    assert row.get("source_agent") == "gpt-5.4"
+    assert row.get("source_client") == "Codex"
+
+
 async def test_recall_with_category_filter():
     await save_memory(
         content="좋아하는 음식은 김치찌개입니다.",

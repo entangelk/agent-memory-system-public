@@ -13,11 +13,15 @@ async def save_memory(
     residual_info: dict | None = None,
     sensitivity: str = "normal",
     source_session: ObjectId | None = None,
+    source_agent: str | None = None,
+    source_client: str | None = None,
 ) -> ObjectId:
     """Save a memory document to the memories collection and return its inserted _id."""
     ents = entities or []
     normalized_residual_info = residual_engine.normalize_residual_info(residual_info)
     normalized_sensitivity = sensitivity_engine.normalize_sensitivity(sensitivity)
+    normalized_source_agent = source_agent.strip() if isinstance(source_agent, str) and source_agent.strip() else None
+    normalized_source_client = source_client.strip() if isinstance(source_client, str) and source_client.strip() else None
     doc = {
         "content": content,
         "category": category,
@@ -29,6 +33,8 @@ async def save_memory(
         "residual_slots": residual_engine.residual_slots(normalized_residual_info),
         "emotional_weight": 0.0,
         "source_session": source_session,
+        "source_agent": normalized_source_agent,
+        "source_client": normalized_source_client,
         "memory_tier": "short_term",
         "recall_count": 0,
         "last_recalled": None,

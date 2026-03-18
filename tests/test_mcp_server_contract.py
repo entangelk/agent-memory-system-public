@@ -118,6 +118,20 @@ async def test_mcp_server_exposes_memory_tool_prompt():
     assert "What do you remember about my coffee preference?" in prompt_text
 
 
+async def test_memory_save_tool_description_guides_conservative_saving():
+    list_tools_handler = app.request_handlers[types.ListToolsRequest]
+
+    tools_result = await list_tools_handler(types.ListToolsRequest())
+    assert isinstance(tools_result.root, types.ListToolsResult)
+
+    save_tool = next(tool for tool in tools_result.root.tools if tool.name == "memory_save")
+    description = save_tool.description or ""
+
+    assert "explicitly asks you to remember something" in description
+    assert "durable and important fact, plan, or preference" in description
+    assert "Do not auto-save style or preference memories" in description
+
+
 async def test_mcp_server_smoke_calls_tools_and_reads_resources():
     policy_get = await _call_tool("memory_policy", {"action": "get"})
     assert policy_get.isError is False

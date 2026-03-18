@@ -7,13 +7,22 @@ from src.engine import topic_engine, sensitivity_engine
 from src.db import collections as col
 
 
+def _normalize_optional_string(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
 def get_tools() -> list[Tool]:
     return [
         Tool(
             name="memory_save",
             description=(
                 "Save a memory to the long-term memory store. "
-                "Use this when you learn a stable preference, fact, plan, or notable event worth remembering. "
+                "Use this when the user explicitly asks you to remember something, or when the conversation reveals a durable and important fact, plan, or preference worth carrying across sessions. "
+                "Do not auto-save style or preference memories just because the user is asking about the memory system itself. "
+                "When known, include the source agent/client so cross-agent recall can keep the original execution context visible. "
                 "The content is stored as provided and may be returned verbatim during recall. "
                 "Clients should extract and summarize the essential information before saving. "
                 "Storing full conversations will reduce retrieval quality and make recall responses noisy. "
@@ -40,6 +49,14 @@ def get_tools() -> list[Tool]:
                         "description": "Sensitivity level (optional, set explicitly by the agent; default: normal)",
                     },
                     "context": {"type": "string", "description": "Additional context (optional)"},
+                    "source_agent": {
+                        "type": "string",
+                        "description": "Agent or model identifier that produced this memory (optional, example: gpt-5.4)",
+                    },
+                    "source_client": {
+                        "type": "string",
+                        "description": "Client/tool identifier that saved this memory (optional, example: Codex, Claude Code, Cursor)",
+                    },
                     "entities": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -93,6 +110,8 @@ async def handle(name: str, args: dict) -> list[TextContent] | None:
     if name != "memory_save":
         return None
     selected_sensitivity = sensitivity_engine.normalize_sensitivity(args.get("sensitivity"))
+    source_agent = _normalize_optional_string(args.get("source_agent"))
+    source_client = _normalize_optional_string(args.get("source_client"))
 
     oid = await save_memory(
         content=args["content"],
@@ -100,10 +119,16 @@ async def handle(name: str, args: dict) -> list[TextContent] | None:
         importance=args["importance"],
         sensitivity=selected_sensitivity,
         context=args.get("context", ""),
+        source_agent=source_agent,
+        source_client=source_client,
         entities=args.get("entities", []),
         residual_info=args.get("residual_info"),
     )
     result = {"id": str(oid), "status": "saved", "sensitivity": selected_sensitivity}
+    if source_agent:
+        result["source_agent"] = source_agent
+    if source_client:
+        result["source_client"] = source_client
 
     compacted_source_ids = args.get("compacted_source_ids", [])
     source_oids: list[ObjectId] = []
